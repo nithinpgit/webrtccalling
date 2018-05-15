@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Webrtc For Safari</title>
+        <style>
+            input{
+                padding: 7px;
+                border-width: 1px;
+                border-radius: 4px;
+            }
+            button{
+                border-width: 0px;
+                padding: 8px;
+                border-radius: 3px;
+                background-color: #542e2e;
+                color: #fff;
+                margin-top: 3px;
+                cursor: pointer;
+            }
+        </style>
+    </head>
+    <body style="position: absolute;width:100%;height: 100%;margin: 0px;">
+     <div style="position: fixed;top:0px;width: 100%;text-align: center;z-index: 999;">
+         <input class="rgen myname" style="display: none;" placeholder="Enter unique name"/>
+         <button class="rgen reg-btn" style="display: none;">REGISTER</button>
+         <input class="callen callee-name" style="display: none;" placeholder="Enter callee name"/>
+         <button class="callen call-bt" style="display: none;">CALL</button>
+         <button class="disk-btn" style="display: none;">DISCONNECT</button>
+     </div>
+     <h4 style="display:none;text-align: center;width: 100%;position: fixed;top: 10px;z-index: 999;color: #542e2e;">WEBRTC IN SAFARI 11</h4>
+     <video id="your-video" style="width: 100%;height: 100%;position: fixed;background-color: #000;z-index: 99;object-fit: cover;"></video>
+     <video id="my-video" muted style="width: 320px;height: 240px;position: fixed;background-color: #000;z-index: 999;right: 10px;bottom: 10px;border:1px solid #ccc;"></video>
+    </body>
+</html>
+<script src="/socket.io/socket.io.js"></script>
+<script src="https://code.jquery.com/jquery-3.2.1.min.js"></script> 
+<script>
+var configuration = { 
+    //"iceServers": [{ "url": "stun:stun.1.google.com:19302" }] 
+    "iceServers": [{ "url": "stun:14.1.30.58:3478" }]
+}; 
+var myConnection = null;
+var name = 'nithin';
+var yourname;
+var socket = null;
+$(document).ready(function(){
+    callClicks();
+    socket = io.connect('/');
+    socket.on('connect',function(){
+       $('.rgen').show();
+       socket.on('message',function(data){
+           var data = JSON.parse(data);
+                switch(data.type) { 
+                    case "login": 
+                        if(data.success === true){
+                            $('.callen').show();
+                            $('.rgen').hide();
+                            publish();
+                        }else{
+                            alert('This user name is not available try another one');
+                        }
+                        break; 
+                    //when somebody wants to call us 
+                    case "offer": 
+                        handleOffer(data.offer, data.name); 
+                        break; 
+                    case "answer": 
+                        handleAnswer(data.answer); 
+                        break; 
+                    //when a remote peer sends an ice candidate to us 
+                    case "candidate": 
+                        handleCandidate(data.candidate); 
+                        break; 
+                    case "leave": 
+                        handleLeave(); 
+                        break; 
+                    default: 
+                        break; 
+                } 
+       })
+    });
+});
+function login(){
+    send({ 
+         type: "login", 
+         name: name 
+      }); 
+}
+function send(data){
+    if (yourname) { 
+      data.name = yourname; 
+   } 
+    socket.emit('message',JSON.stringify(data));
+}
+function publish(){
+    navigator.getUserMedia({ video: true, audio: true },function(stream){
+         var localvideo = document.getElementById('my-video');
+         var remotevideo = document.getElementById('your-video');
+         localvideo.src = window.URL.createObjectURL(stream);
+         localvideo.play();
+         myConnection = new webkitRTCPeerConnection(configuration);
+         myConnection.addStream(stream);
+         myConnection.onaddstream = function(e){
+             remotevideo.src = window.URL.createObjectURL(e.stream);
+             remotevideo.play();
+             $('.disk-btn').show();
+             $('.callen').hide();
+         };
+         myConnection.onicecandidate = function (event) { 
+            if (event.candidate) { 
+               send({ 
+                  type: "candidate", 
+                  candidate: event.candidate 
+               }); 
+            } 
+         }; 
+    },function(error){
+
+    });
+}
+var onIceCandidate  = function(event){
+    alert(event.candidate);
+};
+function callClicks(){
+    $('.reg-btn').click(function(){
+        name = $('.myname').val();
+        if(name){
+           login();
+        }else{
+            alert('please enter valid name');
+        }
+        
+    })
+
+     $('.call-bt').click(function(){
+        yourname = $('.callee-name').val();
+        if(yourname){
+           myConnection.createOffer(function (offer) { 
+                send({ 
+                    type: "offer", 
+                    offer: offer 
+                }); 
+                    
+                myConnection.setLocalDescription(offer); 
+            }, function (error) { 
+                alert("Error when creating an offer"); 
+            });
+        }else{
+            alert('please enter valid callee name');
+        }
+        
+    })
+    $('.disk-btn').click(function(){
+       send({ 
+            type: "leave" 
+        });  
+            
+        handleLeave(); 
+    });
+}
+
+//when somebody sends us an offer 
+function handleOffer(offer, name) { 
+   yourname = name; 
+   myConnection.setRemoteDescription(new RTCSessionDescription(offer));
+	
+   //create an answer to an offer 
+   myConnection.createAnswer(function (answer) { 
+      myConnection.setLocalDescription(answer); 
+      send({ 
+         type: "answer", 
+         answer: answer 
+      }); 
+		
+   }, function (error) { 
+      alert("Error when creating an answer"); 
+   }); 
+};
+function handleAnswer(answer) { 
+    console.log(answer);
+   myConnection.setRemoteDescription(new RTCSessionDescription(answer)); 
+};
+function handleCandidate(candidate) { 
+   myConnection.addIceCandidate(new RTCIceCandidate(candidate)); 
+};
+function handleLeave() { 
+   yourname = null; 
+   var remotevideo = document.getElementById('your-video');
+   remotevideo.src = null; 
+	
+   myConnection.close(); 
+   myConnection.onicecandidate = null; 
+   myConnection.onaddstream = null;
+};
+</script>
